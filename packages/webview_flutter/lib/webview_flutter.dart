@@ -173,6 +173,32 @@ class _WebSettings {
   }
 }
 
+enum WebViewState { shouldStart, startLoad, finishLoad }
+
+class WebViewStateChanged {
+  final WebViewState type;
+  final String url;
+  final int navigationType;
+
+  WebViewStateChanged(this.type, this.url, this.navigationType);
+
+  factory WebViewStateChanged.fromMap(Map<String, dynamic> map) {
+    WebViewState t;
+    switch (map['type']) {
+      case 'shouldStart':
+        t = WebViewState.shouldStart;
+        break;
+      case 'startLoad':
+        t = WebViewState.startLoad;
+        break;
+      case 'finishLoad':
+        t = WebViewState.finishLoad;
+        break;
+    }
+    return new WebViewStateChanged(t, map['url'], map['navigationType']);
+  }
+}
+
 /// Controls a [WebView].
 ///
 /// A [WebViewController] instance can be obtained by setting the [WebView.onWebViewCreated]
@@ -180,11 +206,28 @@ class _WebSettings {
 class WebViewController {
   WebViewController._(int id, _WebSettings settings)
       : _channel = MethodChannel('plugins.flutter.io/webview_$id'),
-        _settings = settings;
+        _settings = settings {
+    _channel.setMethodCallHandler(_handleMessages);
+  }
+
+  final _onStateChanged = new StreamController<WebViewStateChanged>.broadcast();
 
   final MethodChannel _channel;
 
   _WebSettings _settings;
+
+  Future<Null> _handleMessages(MethodCall call) async {
+    switch (call.method) {
+      case "onState":
+        _onStateChanged.add(
+          new WebViewStateChanged.fromMap(
+              new Map<String, dynamic>.from(call.arguments)),
+        );
+        break;
+      default:
+        break;
+    }
+  }
 
   /// Loads the specified URL.
   ///
