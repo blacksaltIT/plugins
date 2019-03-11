@@ -27,6 +27,11 @@ public class FlutterWebView implements PlatformView, MethodCallHandler {
     webView = new WebView(context);
     // Allow local storage.
     webView.getSettings().setDomStorageEnabled(true);
+    // Allow play video without useraction
+    int SDK_INT = android.os.Build.VERSION.SDK_INT;
+    if (SDK_INT > 16) {
+      webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
+    }
 
     methodChannel = new MethodChannel(messenger, "plugins.flutter.io/webview_" + id);
     methodChannel.setMethodCallHandler(this);

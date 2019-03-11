@@ -63,6 +63,15 @@
     WKWebViewConfiguration* configuration = [[WKWebViewConfiguration alloc] init];
     configuration.userContentController = userContentController;
 
+    // Allows playsinline
+    configuration.allowsInlineMediaPlayback = true;
+    if(@available(iOS 10.0, *)) {
+       configuration.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeNone;
+    } else {
+       // Fallback on earlier versions
+       configuration.mediaPlaybackRequiresUserAction = false;
+    }
+
     _webView = [[WKWebView alloc] initWithFrame:frame configuration:configuration];
     __weak __typeof__(self) weakSelf = self;
     [_channel setMethodCallHandler:^(FlutterMethodCall* call, FlutterResult result) {
