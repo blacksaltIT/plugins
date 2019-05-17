@@ -1,3 +1,21 @@
+## 0.3.0
+
+* Update Android dependencies to latest.
+
+## 0.2.0+1
+
+* Removed flaky timeout test.
+
+## 0.2.0
+
+* **Breaking change**. Updated Dart API to replace `call` with `getHttpsCallable`.
+* Added support for timeouts.
+* Additional integration testing.
+
+## 0.1.2+1
+
+* Added a driver test.
+
 ## 0.1.2
 
 * Specifying a version for Cloud Functions CocoaPod dependency to prevent build errors on iOS.

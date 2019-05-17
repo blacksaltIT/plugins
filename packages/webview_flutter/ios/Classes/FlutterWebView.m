@@ -3,16 +3,19 @@
 // found in the LICENSE file.
 
 #import "FlutterWebView.h"
+#import "FLTWKNavigationDelegate.h"
 #import "JavaScriptChannelHandler.h"
 
 @implementation FLTWebViewFactory {
+  NSObject<FlutterPluginRegistrar>* _registrar;
   NSObject<FlutterBinaryMessenger>* _messenger;
 }
 
-- (instancetype)initWithMessenger:(NSObject<FlutterBinaryMessenger>*)messenger {
+- (instancetype)initWithRegistrar:(NSObject<FlutterPluginRegistrar>*)registrar {
   self = [super init];
   if (self) {
-    _messenger = messenger;
+    _registrar = registrar;
+    _messenger = registrar.messenger;
   }
   return self;
 }
@@ -27,7 +30,7 @@
   FLTWebViewController* webviewController = [[FLTWebViewController alloc] initWithFrame:frame
                                                                          viewIdentifier:viewId
                                                                               arguments:args
-                                                                        binaryMessenger:_messenger];
+                                                                              registrar:_registrar];
   return webviewController;
 }
 
@@ -40,17 +43,21 @@
   NSString* _currentUrl;
   // The set of registered JavaScript channel names.
   NSMutableSet* _javaScriptChannelNames;
+  FLTWKNavigationDelegate* _navigationDelegate;
+  NSObject<FlutterPluginRegistrar>* _registrar;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame
                viewIdentifier:(int64_t)viewId
                     arguments:(id _Nullable)args
-              binaryMessenger:(NSObject<FlutterBinaryMessenger>*)messenger {
+                    registrar:(NSObject<FlutterPluginRegistrar>*)registrar {
   if ([super init]) {
     _viewId = viewId;
+    _registrar = registrar;
 
     NSString* channelName = [NSString stringWithFormat:@"plugins.flutter.io/webview_%lld", viewId];
-    _channel = [FlutterMethodChannel methodChannelWithName:channelName binaryMessenger:messenger];
+    _channel = [FlutterMethodChannel methodChannelWithName:channelName
+                                           binaryMessenger:registrar.messenger];
     _javaScriptChannelNames = [[NSMutableSet alloc] init];
 
     WKUserContentController* userContentController = [[WKUserContentController alloc] init];
@@ -73,6 +80,8 @@
     }
 
     _webView = [[WKWebView alloc] initWithFrame:frame configuration:configuration];
+    _navigationDelegate = [[FLTWKNavigationDelegate alloc] initWithChannel:_channel];
+    _webView.navigationDelegate = _navigationDelegate;
     __weak __typeof__(self) weakSelf = self;
     [_channel setMethodCallHandler:^(FlutterMethodCall* call, FlutterResult result) {
       [weakSelf onMethodCall:call result:result];
@@ -82,7 +91,11 @@
 
     NSString* initialUrl = args[@"initialUrl"];
     if ([initialUrl isKindOfClass:[NSString class]]) {
-      [self loadUrl:initialUrl];
+      if ([initialUrl rangeOfString:@"://"].location == NSNotFound) {
+        [self loadAssetFile:initialUrl];
+      } else {
+        [self loadUrl:initialUrl];
+      }
     }
   }
   return self;
@@ -97,6 +110,8 @@
     [self onUpdateSettings:call result:result];
   } else if ([[call method] isEqualToString:@"loadUrl"]) {
     [self onLoadUrl:call result:result];
+  } else if ([[call method] isEqualToString:@"loadAssetFile"]) {
+    [self onLoadAssetFile:call result:result];
   } else if ([[call method] isEqualToString:@"canGoBack"]) {
     [self onCanGoBack:call result:result];
   } else if ([[call method] isEqualToString:@"canGoForward"]) {
@@ -128,9 +143,20 @@
 }
 
 - (void)onLoadUrl:(FlutterMethodCall*)call result:(FlutterResult)result {
+  if (![self loadRequest:[call arguments]]) {
+    result([FlutterError
+        errorWithCode:@"loadUrl_failed"
+              message:@"Failed parsing the URL"
+              details:[NSString stringWithFormat:@"Request was: '%@'", [call arguments]]]);
+  } else {
+    result(nil);
+  }
+}
+
+- (void)onLoadAssetFile:(FlutterMethodCall*)call result:(FlutterResult)result {
   NSString* url = [call arguments];
-  if (![self loadUrl:url]) {
-    result([FlutterError errorWithCode:@"loadUrl_failed"
+  if (![self loadAssetFile:url]) {
+    result([FlutterError errorWithCode:@"loadAssetFile_failed"
                                message:@"Failed parsing the URL"
                                details:[NSString stringWithFormat:@"URL was: '%@'", url]]);
   } else {
@@ -238,6 +264,9 @@
     if ([key isEqualToString:@"jsMode"]) {
       NSNumber* mode = settings[key];
       [self updateJsMode:mode];
+    } else if ([key isEqualToString:@"hasNavigationDelegate"]) {
+      NSNumber* hasDartNavigationDelegate = settings[key];
+      _navigationDelegate.hasDartNavigationDelegate = [hasDartNavigationDelegate boolValue];
     } else {
       NSLog(@"webview_flutter: unknown setting key: %@", key);
     }
@@ -258,13 +287,50 @@
   }
 }
 
+- (bool)loadRequest:(NSDictionary<NSString*, id>*)request {
+  if (!request) {
+    return false;
+  }
+
+  NSString* url = request[@"url"];
+  if ([url isKindOfClass:[NSString class]]) {
+    id headers = request[@"headers"];
+    if ([headers isKindOfClass:[NSDictionary class]]) {
+      return [self loadUrl:url withHeaders:headers];
+    } else {
+      return [self loadUrl:url];
+    }
+  }
+
+  return false;
+}
+
 - (bool)loadUrl:(NSString*)url {
+  return [self loadUrl:url withHeaders:[NSMutableDictionary dictionary]];
+}
+
+- (bool)loadUrl:(NSString*)url withHeaders:(NSDictionary<NSString*, NSString*>*)headers {
   NSURL* nsUrl = [NSURL URLWithString:url];
   if (!nsUrl) {
     return false;
   }
-  NSURLRequest* req = [NSURLRequest requestWithURL:nsUrl];
-  [_webView loadRequest:req];
+  NSMutableURLRequest* request = [NSMutableURLRequest requestWithURL:nsUrl];
+  [request setAllHTTPHeaderFields:headers];
+  [_webView loadRequest:request];
+  return true;
+}
+
+- (bool)loadAssetFile:(NSString*)url {
+  NSString* key = [_registrar lookupKeyForAsset:url];
+  NSURL* nsUrl = [[NSBundle mainBundle] URLForResource:key withExtension:nil];
+  if (!nsUrl) {
+    return false;
+  }
+  if (@available(iOS 9.0, *)) {
+    [_webView loadFileURL:nsUrl allowingReadAccessToURL:[NSURL URLWithString:@"file:///"]];
+  } else {
+    return false;
+  }
   return true;
 }
 
