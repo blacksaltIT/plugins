@@ -48,11 +48,6 @@ public class FlutterWebView implements PlatformView, MethodCallHandler {
     platformThreadHandler = new Handler(context.getMainLooper());
     // Allow local storage.
     webView.getSettings().setDomStorageEnabled(true);
-    // Allow play video without useraction
-    int SDK_INT = android.os.Build.VERSION.SDK_INT;
-    if (SDK_INT > 16) {
-      webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
-    }
 
     methodChannel = new MethodChannel(messenger, "plugins.flutter.io/webview_" + id);
     methodChannel.setMethodCallHandler(this);
@@ -71,11 +66,7 @@ public class FlutterWebView implements PlatformView, MethodCallHandler {
     }
     if (params.containsKey("initialUrl")) {
       String url = (String) params.get("initialUrl");
-      if (url.contains("://")) {
-        webView.loadUrl(url);
-      } else {
-        webView.loadUrl("file:///android_asset/flutter_assets/" + url);
-      }
+      webView.loadUrl(url);
     }
   }
 
